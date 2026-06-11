@@ -1,5 +1,0 @@
-{
-  "vuln_type": "stack_buffer_overflow",
-  "location": "main",
-  "cause": "fgets函数将用户输入写入栈上128字节缓冲区，虽然程序有长度检查，但在检查前数据已写入栈，可能导致栈溢出"
-}
