@@ -1,0 +1,69 @@
+rules:
+  - id: intrapanel.python.sql-injection.tainted-sql-execute
+    languages: [python]
+    severity: ERROR
+    mode: taint
+    message: >-
+      User-controlled input flows into a SQL execution sink. Do not build SQL
+      statements with string formatting, f-strings, concatenation, or .format().
+      Use parameterized queries such as cur.execute("SELECT ... WHERE username = ?", (username,)).
+    metadata:
+      category: security
+      confidence: HIGH
+      cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"
+      owasp: "A03:2021 Injection"
+      technology: [python, sqlite, flask]
+      source: "Flask request input or db.py function parameters"
+      sink: "cursor.execute / connection.execute / executescript / executemany"
+      attack_flow: "user input -> SQL string formatting -> database execution"
+
+    pattern-sources:
+      # 1. Flask HTTP input sources.
+      - pattern: request.args.get(...)
+      - pattern: request.args[...]
+      - pattern: request.form.get(...)
+      - pattern: request.form[...]
+      - pattern: request.values.get(...)
+      - pattern: request.values[...]
+      - pattern: request.get_json(...)
+      - pattern: request.json
+      - pattern: request.cookies.get(...)
+      - pattern: request.headers.get(...)
+
+      # 2. Explicitly model db.py parameters as tainted sources.
+      #    This catches cases where request data is passed into helper functions
+      #    such as find_user(username), find_user_by_email(email), create_user(...).
+      - patterns:
+          - pattern-inside: |
+              def find_user($USERNAME):
+                ...
+          - pattern: $USERNAME
+
+      - patterns:
+          - pattern-inside: |
+              def find_user_by_email($EMAIL):
+                ...
+          - pattern: $EMAIL
+
+      - patterns:
+          - pattern-inside: |
+              def create_user($USERNAME, $PASSWORD, $EMAIL):
+                ...
+          - pattern-either:
+              - pattern: $USERNAME
+              - pattern: $PASSWORD
+              - pattern: $EMAIL
+
+    pattern-sinks:
+      # sqlite cursor / connection execute sinks.
+      # focus-metavariable ensures the taint must flow into the SQL argument,
+      # not merely into the parameter tuple of a safe parameterized query.
+      - patterns:
+          - pattern-either:
+              - pattern: $CUR.execute($SQL, ...)
+              - pattern: $CONN.execute($SQL, ...)
+              - pattern: $CUR.executemany($SQL, ...)
+              - pattern: $CONN.executemany($SQL, ...)
+              - pattern: $CUR.executescript($SQL)
+              - pattern: $CONN.executescript($SQL)
+          - focus-metavariable: $SQL
