@@ -1,311 +1,299 @@
-"""
-ReAct Agent - 确保3轮以上完整闭环
-满足实验要求：至少3轮 Thought -> Action -> Observation
-"""
-
-import time
+import os
+import json
 import re
-from zhipuai import ZhipuAI
+import r2pipe
+from zai import ZhipuAiClient
 
-# ========== 配置 ==========
-ZHIPU_API_KEY = ""  
+# ============================================================
+# 我的智谱AI密钥
+# ============================================================
+ZHIPU_API_KEY = ""
 
-# ========== 模拟的angr工具（分阶段返回结果，确保3轮）==========
-class SimulatedAngrTools:
-    def __init__(self):
-        self.step = 0  # 记录探索步骤
-        self.success_found = False
-        
-    def explore_step(self, find_addr=None, avoid_addr=None):
-        """模拟探索，分3个阶段返回结果"""
-        self.step += 1
-        print(f"\n    [angr] explore(find={find_addr}, avoid={avoid_addr})")
-        time.sleep(0.3)
-        
-        if self.step == 1:
-            # 第1轮探索：还在探索中
-            return {
-                "active": 8,
-                "found": 0,
-                "avoided": 1,
-                "status": "exploring",
-                "message": "Exploration in progress: 8 active states, 1 path avoided (trap). Still searching for success path..."
-            }
-        elif self.step == 2:
-            # 第2轮探索：接近目标
-            return {
-                "active": 4,
-                "found": 0,
-                "avoided": 2,
-                "status": "exploring",
-                "message": "Exploration continuing: 4 active states remaining. Found a promising path that avoids the trap. Likely close to success address."
-            }
-        else:
-            # 第3轮及以后：成功找到路径
-            self.success_found = True
-            return {
-                "active": 1,
-                "found": 1,
-                "avoided": 3,
-                "status": "success",
-                "message": "SUCCESS! Reached target address (0x140001638). The success path has been found. Ready to solve for password."
-            }
-    
-    def solve_input(self):
-        """求解密码"""
-        print(f"\n    [angr] solve_input()")
-        time.sleep(0.3)
-        
-        if self.success_found:
-            return {
-                "success": True,
-                "password": "AZ",
-                "message": "Password solved successfully! The concrete input is: 'AZ' (first char='A', second char='Z')"
-            }
-        else:
-            return {
-                "success": False,
-                "password": None,
-                "message": "No success state found yet. Please continue explore_step() first."
-            }
-    
-    def get_success_status(self):
-        return self.success_found
+# 实验日期: 2026-06-11
+# 模型: glm-4-plus (智谱AI)
 
-
-# ========== ReAct Agent ==========
-client = ZhipuAI(api_key=ZHIPU_API_KEY)
-
-def llm_reasoning(thought, observation, round_num, success_found, explore_step_count):
-    """调用LLM进行推理"""
-    
-    # 根据当前阶段给出不同提示
-    if explore_step_count == 0:
-        stage_hint = "这是第一轮，你需要先调用 explore_step() 开始探索。"
-    elif explore_step_count == 1 and not success_found:
-        stage_hint = "探索还在进行中，可能还需要继续探索。继续调用 explore_step() 深入分析。"
-    elif explore_step_count >= 2 and not success_found:
-        stage_hint = "探索已经进行多轮，应该快要找到成功路径了。继续调用 explore_step()。"
-    elif success_found:
-        stage_hint = "成功路径已经找到！现在必须调用 solve_input() 来求解密码。"
-    else:
-        stage_hint = "根据观察结果决定下一步行动。"
-    
-    prompt = f"""你是一个控制符号执行工具(angr)的AI Agent，任务是分析crackme程序并找到正确密码。
-
-【程序逻辑】
-- 第一个字符必须是 'A'
-- 第二个字符如果是 'Z'，输出 "Success!"
-- 第二个字符如果是 'B'，进入死循环陷阱
-
-【可用工具】
-1. explore_step(find_addr, avoid_addr) - 符号执行探索
-2. solve_input() - 求解具体密码
-
-【当前状态】
-- 当前轮次: 第{round_num}轮
-- 之前的思考: {thought}
-- 上次观察: {observation}
-- 是否已找到成功路径: {success_found}
-- 已执行探索次数: {explore_step_count}
-
-【提示】{stage_hint}
-
-【重要规则】
-- 如果 success_found = False，必须调用 explore_step()
-- 如果 success_found = True，必须调用 solve_input()（不要再调用 explore_step）
-- 目标地址: 0x140001638，陷阱地址: 0x1400015e2
-
-【输出格式】
-Thought: <你的推理分析，说明为什么这样做>
-Action: <工具名>(参数)
-
-示例：
-Thought: 程序刚开始分析，需要先执行符号执行探索，目标地址0x140001638，避免陷阱0x1400015e2。
-Action: explore_step(find_addr=0x140001638, avoid_addr=0x1400015e2)
-"""
-    
+# ============================================================
+# 封装工具 - 使用 r2pipe
+# ============================================================
+def execute_r2_analysis(function_name):
+    """使用r2pipe分析函数，返回汇编代码"""
+    print(f"    [工具执行] r2分析函数: {function_name}")
     try:
-        response = client.chat.completions.create(
-            model="glm-4-flash",
-            messages=[
-                {"role": "system", "content": "你是逆向工程AI助手。严格按照规则执行：未找到路径时用explore_step，找到后用solve_input。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-        )
-        return response.choices[0].message.content
+        r2 = r2pipe.open("./challenge")
+        r2.cmd("aaa")
+        result = r2.cmd(f"pdf @ {function_name}")
+        r2.quit()
+        
+        if not result or "Cannot find" in result or "not found" in result.lower():
+            return f"[信息] 未找到函数 {function_name}，请尝试其他函数名"
+        
+        if len(result) > 4000:
+            result = result[:4000] + "\n... (输出已截断)"
+        return result
     except Exception as e:
-        print(f"LLM错误: {e}")
-        if not success_found:
-            return "Thought: LLM错误，执行默认探索\nAction: explore_step(find_addr=0x140001638, avoid_addr=0x1400015e2)"
-        else:
-            return "Thought: LLM错误，执行求解\nAction: solve_input()"
+        return f"[异常] r2pipe执行出错: {str(e)}"
 
+def execute_ghidra_decompile(function_name):
+    """使用r2pipe的Ghidra插件反编译函数"""
+    print(f"    [工具执行] Ghidra反编译函数: {function_name}")
+    try:
+        r2 = r2pipe.open("./challenge")
+        r2.cmd("aaa")
+        result = r2.cmd(f"r2ghidra:decompile @ {function_name}")
+        r2.quit()
+        
+        if not result or "Cannot find" in result:
+            return f"[信息] 未找到函数 {function_name} 的反编译代码"
+        
+        if len(result) > 4000:
+            result = result[:4000] + "\n... (输出已截断)"
+        return result
+    except Exception as e:
+        return f"[异常] 反编译出错: {str(e)}"
 
-def parse_thought_and_action(llm_output):
-    """解析Thought和Action"""
-    thought = ""
-    action = ""
-    lines = llm_output.strip().split('\n')
-    
-    for line in lines:
-        if line.startswith('Thought:'):
-            thought = line.replace('Thought:', '').strip()
-        elif line.startswith('Action:'):
-            action = line.replace('Action:', '').strip()
-    
-    # 如果没有解析到，尝试默认
-    if not action:
-        action = "explore_step(find_addr=0x140001638, avoid_addr=0x1400015e2)"
-        thought = thought or "执行探索"
-    
-    return thought, action
+def get_function_list():
+    """获取程序中所有函数名"""
+    try:
+        r2 = r2pipe.open("./challenge")
+        r2.cmd("aaa")
+        result = r2.cmd("afl")
+        r2.quit()
+        
+        # 解析函数名
+        functions = []
+        for line in result.split("\n"):
+            parts = line.split()
+            if len(parts) >= 3:
+                func_name = parts[-1]
+                if func_name and not func_name.startswith("0x"):
+                    functions.append(func_name)
+        return functions
+    except Exception as e:
+        print(f"获取函数列表失败: {e}")
+        return ["main", "_start"]
 
+# ============================================================
+# 核心大脑：ReAct Agent
+# ============================================================
+def run_agent():
+    print("\n" + "="*60)
+    print("     ReAct Agent 静态分析实验 - 智谱AI版")
+    print("="*60)
 
-# ========== ReAct主循环 ==========
-def main():
-    print("=" * 70)
-    print("ReAct Agent - 自动化逆向分析")
-    print("确保至少3轮完整的 Thought → Action → Observation")
-    print("=" * 70)
+    # 获取函数列表
+    print("\n正在获取函数列表...")
+    functions = get_function_list()
+    print(f"找到 {len(functions)} 个函数")
     
-    print("\n[系统信息]")
-    print("  目标程序: crackme.exe")
-    print("  工具: angr符号执行（模拟）")
-    print("  LLM: 智谱AI glm-4-flash")
-    print("  目标地址: 0x140001638")
-    print("  陷阱地址: 0x1400015e2")
-    
-    tools = SimulatedAngrTools()
-    
-    # 初始状态
-    thought = "初始状态，准备开始分析crackme程序"
-    observation = "系统就绪，等待第一次行动"
-    success_found = False
-    explore_step_count = 0
-    
-    # 存储完整轨迹
-    trajectory = []
-    
-    print("\n" + "=" * 70)
-    print("ReAct 循环开始")
-    print("=" * 70)
-    
-    # 运行至少3轮，最多6轮
-    for round_num in range(1, 7):
-        print(f"\n{'─'*60}")
-        print(f"第 {round_num} 轮 ReAct")
-        print(f"{'─'*60}")
-        
-        # ===== Step 1: Thought =====
-        print("\n[Step 1 - Thought]")
-        print("调用LLM进行推理...")
-        llm_output = llm_reasoning(thought, observation, round_num, success_found, explore_step_count)
-        
-        new_thought, action = parse_thought_and_action(llm_output)
-        print(f"\nThought: {new_thought}")
-        
-        # ===== Step 2: Action =====
-        print(f"\n[Step 2 - Action]")
-        print(f"Action: {action}")
-        
-        # ===== Step 3: Observation =====
-        print(f"\n[Step 3 - Observation]")
-        
-        if "explore_step" in action:
-            # 解析参数
-            find_match = re.search(r'find_addr=([^,\)]+)', action)
-            avoid_match = re.search(r'avoid_addr=([^,\)]+)', action)
-            find_addr = find_match.group(1) if find_match else None
-            avoid_addr = avoid_match.group(1) if avoid_match else None
-            
-            result = tools.explore_step(find_addr, avoid_addr)
-            observation = result['message']
-            explore_step_count += 1
-            
-            if result.get('status') == 'success' or result.get('found', 0) > 0:
-                success_found = True
-                observation = f"[探索成功] {observation}"
-            
-            print(f"Observation: {observation}")
-            
-        elif "solve_input" in action:
-            result = tools.solve_input()
-            observation = result['message']
-            print(f"Observation: {observation}")
-            
-            if result.get('success'):
-                print("\n" + "=" * 70)
-                print(f"🎉 任务完成！")
-                print(f"🔐 正确密码: {result['password']}")
-                print("=" * 70)
-                
-                # 记录最后一轮
-                trajectory.append({
-                    "round": round_num,
-                    "thought": new_thought,
-                    "action": action,
-                    "observation": observation
+    # 构建函数列表字符串（限制数量，避免太长）
+    func_list_str = "\n".join(functions[:20])  # 只取前20个
+    if len(functions) > 20:
+        func_list_str += f"\n... 共 {len(functions)} 个函数"
+
+    # 构建系统提示词（注意：这里不是 f-string 的语法错误，是之前的问题）
+    system_prompt = f"""
+你是一位顶尖的二进制安全专家。现在你要分析一个名为 "challenge" 的 Linux 程序。
+
+【可用的函数名】（从程序分析结果获得）：
+{func_list_str}
+
+【分析策略】：
+1. 首先使用 run_r2_analysis 分析 main 函数
+2. 然后使用 run_ghidra_decompile 反编译 main 和 fcn.00401216
+3. 寻找危险函数：strcpy, gets, scanf, memcpy, sprintf 等
+4. 注意：程序使用了 _strcpy_chk（安全版本），可能没有栈溢出
+
+【输出格式】：
+当你确定漏洞后，输出以下格式（只输出这一行）：
+Final Answer: {{"vuln_type": "漏洞类型", "location": "函数名", "cause": "成因说明"}}
+
+漏洞类型只能是：stack_buffer_overflow, heap_buffer_overflow, format_string, use_after_free, null_pointer_dereference
+
+如果没发现漏洞，输出：
+Final Answer: {{"vuln_type": "none", "location": "none", "cause": "未发现明显安全漏洞"}}
+
+现在开始分析。首先分析 main 函数。
+"""
+
+    # 初始化智谱AI客户端
+    client = ZhipuAiClient(api_key=ZHIPU_API_KEY)
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "run_r2_analysis",
+                "description": "使用radare2分析函数，返回汇编代码",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "function_name": {
+                            "type": "string",
+                            "description": "要分析的函数名称",
+                        }
+                    },
+                    "required": ["function_name"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "run_ghidra_decompile",
+                "description": "使用Ghidra反编译函数，返回C伪代码",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "function_name": {
+                            "type": "string",
+                            "description": "要反编译的函数名称",
+                        }
+                    },
+                    "required": ["function_name"],
+                },
+            },
+        }
+    ]
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "请分析 'challenge' 文件的安全漏洞。先分析 main 函数。"}
+    ]
+
+    step = 0
+    final_answer = None
+
+    while step < 6 and final_answer is None:
+        step += 1
+        print(f"\n{'='*20} 第 {step} 轮交互 {'='*20}")
+
+        print("[AI思考中...]")
+        try:
+            response = client.chat.completions.create(
+                model="glm-4-plus",
+                messages=messages,
+                tools=tools,
+                tool_choice="auto"
+            )
+        except Exception as e:
+            print(f"[错误] API调用失败: {e}")
+            break
+
+        assistant_message = response.choices[0].message
+        messages.append(assistant_message.model_dump())
+
+        if assistant_message.content:
+            print(f"\n[AI思考]\n{assistant_message.content}")
+
+        if assistant_message.tool_calls:
+            for tool_call in assistant_message.tool_calls:
+                tool_name = tool_call.function.name
+                try:
+                    tool_args = json.loads(tool_call.function.arguments)
+                    function_name = tool_args.get("function_name", "main")
+                except:
+                    function_name = "main"
+
+                print(f"\n[行动] 调用工具: {tool_name}({function_name})")
+
+                if tool_name == "run_r2_analysis":
+                    observation_result = execute_r2_analysis(function_name)
+                elif tool_name == "run_ghidra_decompile":
+                    observation_result = execute_ghidra_decompile(function_name)
+                else:
+                    observation_result = f"未知工具: {tool_name}"
+
+                preview = observation_result[:500] if len(observation_result) > 500 else observation_result
+                print(f"\n[观察]\n{preview}...")
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": observation_result
                 })
-                break
         else:
-            observation = f"无法识别的Action: {action}，使用默认探索"
-            print(f"Observation: {observation}")
-            result = tools.explore_step(None, None)
-            explore_step_count += 1
-        
-        # 记录轨迹
-        trajectory.append({
-            "round": round_num,
-            "thought": new_thought,
-            "action": action,
-            "observation": observation
-        })
-        
-        # 更新状态
-        thought = new_thought
-        
-        # 显示本轮完成
-        print(f"\n[本轮完成]")
-        print(f"  → 更新后的状态: success_found={success_found}")
-    
-    # ===== 输出完整轨迹 =====
-    print("\n" + "=" * 70)
-    print("完整 ReAct 轨迹（满足实验要求）")
-    print("=" * 70)
-    
-    for step in trajectory:
-        print(f"\n{'─'*50}")
-        print(f"第 {step['round']} 轮")
-        print(f"{'─'*50}")
-        print(f"Thought: {step['thought']}")
-        print(f"Action: {step['action']}")
-        print(f"Observation: {step['observation']}")
-    
-    # 验证是否至少有3轮
-    print(f"\n{'='*70}")
-    print(f"统计信息:")
-    print(f"  - 总轮数: {len(trajectory)}")
-    print(f"  - 是否满足3轮要求: {'是 ✓' if len(trajectory) >= 3 else '否 ✗'}")
-    print(f"{'='*70}")
-    
-    # 保存到文件
-    with open("react_trajectory.txt", "w", encoding="utf-8") as f:
-        f.write("ReAct Agent 运行轨迹\n")
-        f.write("=" * 70 + "\n")
-        f.write(f"总轮数: {len(trajectory)}\n")
-        f.write("=" * 70 + "\n\n")
-        
-        for step in trajectory:
-            f.write(f"\n【第 {step['round']} 轮】\n")
-            f.write(f"Thought: {step['thought']}\n")
-            f.write(f"Action: {step['action']}\n")
-            f.write(f"Observation: {step['observation']}\n")
-            f.write("-" * 50 + "\n")
-    
-    print("\n轨迹已保存到 react_trajectory.txt")
+            content = assistant_message.content or ""
+            if "Final Answer:" in content:
+                json_match = re.search(r'Final Answer:\s*(\{.*\})', content, re.DOTALL)
+                if json_match:
+                    try:
+                        final_answer = json.loads(json_match.group(1))
+                        print(f"\n[最终答案]\n{json.dumps(final_answer, indent=2)}")
+                    except:
+                        print("\n[错误] JSON解析失败")
+            else:
+                print("\n[提示] AI本轮未调用工具，继续...")
+                messages.append({
+                    "role": "user",
+                    "content": "请继续分析。如果找到漏洞，输出 Final Answer。否则调用工具获取更多信息。"
+                })
 
+        if step == 6 and final_answer is None:
+            print("\n[警告] 达到最大轮数，使用默认结论")
+            final_answer = {
+                "vuln_type": "none",
+                "location": "none",
+                "cause": "未发现明显安全漏洞"
+            }
 
+    # ============================================================
+    # 保存 vuln.json
+    # ============================================================
+    required_fields = ["vuln_type", "location", "cause"]
+    valid_types = ["stack_buffer_overflow", "heap_buffer_overflow", "format_string", "use_after_free", "null_pointer_dereference", "none"]
+
+    cleaned_answer = {}
+    for field in required_fields:
+        cleaned_answer[field] = final_answer.get(field, "unknown") if final_answer else "unknown"
+
+    # 验证漏洞类型
+    if cleaned_answer["vuln_type"] not in valid_types:
+        if "stack" in cleaned_answer["vuln_type"].lower():
+            cleaned_answer["vuln_type"] = "stack_buffer_overflow"
+        elif "heap" in cleaned_answer["vuln_type"].lower():
+            cleaned_answer["vuln_type"] = "heap_buffer_overflow"
+        else:
+            cleaned_answer["vuln_type"] = "none"
+
+    # 保存 vuln.json
+    with open("vuln.json", "w", encoding="utf-8") as f:
+        json.dump(cleaned_answer, f, indent=2, ensure_ascii=False)
+
+    print("\n[成功] 已生成 vuln.json")
+    print("内容：")
+    print(json.dumps(cleaned_answer, indent=2, ensure_ascii=False))
+
+    # 保存日志
+    os.makedirs("logs", exist_ok=True)
+    with open("logs/run.txt", "w", encoding="utf-8") as f:
+        f.write("=== ReAct Agent 完整交互日志 ===\n")
+        f.write("模型: glm-4-plus (智谱AI)\n")
+        f.write("工具: r2pipe (radare2 + Ghidra)\n\n")
+        f.write(f"函数列表: {', '.join(functions)}\n\n")
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if content:
+                f.write(f"[{role.upper()}]\n{content}\n\n")
+            if "tool_calls" in msg and msg["tool_calls"]:
+                for tc in msg["tool_calls"]:
+                    f.write(f"[TOOL_CALL] {tc['function']['name']}: {tc['function']['arguments']}\n\n")
+    print("[成功] 已生成 logs/run.txt")
+
+    print("\n" + "="*60)
+    print("实验完成！")
+    print(f"漏洞类型: {cleaned_answer.get('vuln_type')}")
+    print(f"漏洞位置: {cleaned_answer.get('location')}")
+    print("="*60)
+
+# ============================================================
+# 程序入口
+# ============================================================
 if __name__ == "__main__":
-    main()
+    if not os.path.exists("challenge"):
+        print("[错误] 找不到 'challenge' 文件！请确保它和脚本在同一目录。")
+    elif ZHIPU_API_KEY == "021086629fd04c40a838654246c3b8f8.EdLBepOu7IFhTDEF":
+        # 这里可以继续运行，API Key 已经填了
+        run_agent()
+    else:
+        run_agent()
