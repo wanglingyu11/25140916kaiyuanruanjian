@@ -1,0 +1,9 @@
+LICENSE.txt
+README.md
+pyproject.toml
+src/25140916ly_wang111_test_package.egg-info/PKG-INFO
+src/25140916ly_wang111_test_package.egg-info/SOURCES.txt
+src/25140916ly_wang111_test_package.egg-info/dependency_links.txt
+src/25140916ly_wang111_test_package.egg-info/top_level.txt
+src/my_package/__init__.py
+src/my_package/core.py

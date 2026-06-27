@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "25140916ly_wang111-test-package"
+version = "0.1.1"
+description = "A minimal test package"
+readme = "README.md"
+authors = [{name = "王玲玉", email = "ly_wang111@qq.com"}]
+license = {text = "MIT"}
+requires-python = ">=3.7"
+dependencies = []
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages]
+find = {where = ["src"]}
